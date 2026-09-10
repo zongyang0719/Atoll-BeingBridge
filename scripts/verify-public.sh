@@ -10,6 +10,17 @@ for file in LICENSE NOTICE README.md install.sh build.sh .github/workflows/verif
   fi
 done
 
+PLIST_PROBE="$(mktemp "${TMPDIR:-/tmp}/being-notch-agent.XXXXXX")"
+trap 'rm -f "$PLIST_PROBE"' EXIT
+cp "$ROOT/resources/io.github.beingnotch.bridge.plist" "$PLIST_PROBE"
+plutil -replace ProgramArguments -xml '<array><string>/tmp/being-notch</string></array>' "$PLIST_PROBE"
+if [[ "$(plutil -extract ProgramArguments raw "$PLIST_PROBE")" != "1" ]] || \
+  [[ "$(plutil -extract ProgramArguments.0 raw "$PLIST_PROBE")" != "/tmp/being-notch" ]] || \
+  ! rg -q 'plutil -replace ProgramArguments -xml' "$ROOT/install.sh"; then
+  echo "installer does not render exactly one bridge argument"
+  exit 1
+fi
+
 RETIRED_PROVIDER="open""router"
 PRIVATE_HOME="/""Users/"
 LEGACY_DIRECTORY=".mtmr-""cards"

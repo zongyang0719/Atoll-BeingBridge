@@ -5,6 +5,7 @@ set -eu
 ROOT="${0:A:h}"
 LABEL="io.github.beingnotch.bridge"
 INSTALL_DIR="$HOME/Library/Application Support/BeingNotch"
+INSTALL_BIN="$INSTALL_DIR/being-notch"
 AGENT_DIR="$HOME/Library/LaunchAgents"
 AGENT_PATH="$AGENT_DIR/$LABEL.plist"
 LOG_PATH="$HOME/Library/Logs/being-notch.log"
@@ -13,7 +14,7 @@ PORT=9021
 "$ROOT/build.sh"
 mkdir -p "$AGENT_DIR"
 cp "$ROOT/resources/$LABEL.plist" "$AGENT_PATH"
-plutil -replace ProgramArguments.0 -string "$INSTALL_DIR/being-notch" "$AGENT_PATH"
+plutil -replace ProgramArguments -xml "<array><string>$INSTALL_BIN</string></array>" "$AGENT_PATH"
 plutil -replace StandardOutPath -string "$LOG_PATH" "$AGENT_PATH"
 plutil -replace StandardErrorPath -string "$LOG_PATH" "$AGENT_PATH"
 
