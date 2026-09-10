@@ -1,0 +1,12 @@
+name: Verify public package
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: zsh scripts/verify-public.sh

@@ -1,0 +1,15 @@
+# Third-party notices
+
+## Atoll
+
+Being Notch communicates with a separately installed Atoll instance over its
+local extension socket. This repository does not include, link, or redistribute
+Atoll source code, binaries, icons, or other Atoll assets. Atoll is required at
+runtime and remains subject to its own license.
+
+## BeingAnywhere
+
+The chat relay follows the public Being chat-stream and replay semantics
+documented by GuangCZ/BeingAnywhere. This repository does not include
+BeingAnywhere source code or assets. See the upstream project and its license:
+https://github.com/GuangCZ/BeingAnywhere

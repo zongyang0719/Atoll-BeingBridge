@@ -1,0 +1,144 @@
+// 刘海里的最小 Loom：只做「看回复 + 发消息」。状态与流事件走本机代理，
+// token 不进 Atoll payload；网页本身从不插入动态状态，避免 descriptor 更新时
+// 触发 WKWebView reload、吃掉正在输入的草稿。
+//
+// 协议语义参考 BeingAnywhere（MIT）：`POST /api/chat/stream` 的 SSE 优先直读，
+// 服务端若只回 202，则按 `/api/stream/active?after=` 接续。这里不照搬浏览器扩展的
+// 选词、侧栏或历史管理，只留下 Loom 对话真正需要的最小闭环。
+//
+// ⚠️ HTML 上限 20000 字节（`AtollWidgetWebContentDescriptor.isValid`）。
+
+import Foundation
+
+func chatHTML(port: UInt16, setupKey: String) -> String {
+    template
+        .replacingOccurrences(of: "{{PORT}}", with: String(port))
+        .replacingOccurrences(of: "{{SETUP_KEY}}", with: setupKey)
+}
+
+private let template = #"""
+<style>
+:root{--loom-text:#e6edf3;--loom-muted:#7d8590;--loom-accent:#58a6ff;--loom-being:#3fb950;--loom-danger:#f85149}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden}
+body{font-family:-apple-system,'SF Pro Text',system-ui;color:var(--loom-text)}
+.shell{width:100%;height:100%;max-width:560px;margin:0 auto;display:flex;flex-direction:column;min-height:0}
+.hidden{display:none!important}
+#chat{position:relative;width:100%;height:100%;display:flex;flex-direction:column;min-height:0}
+#gear{position:absolute;z-index:2;top:2px;right:7px;width:23px;height:23px;border:0;border-radius:8px;background:rgba(255,255,255,.07);color:var(--loom-muted);font-size:14px;cursor:pointer}
+#log{flex:1;min-height:0;overflow-y:auto;padding:3px 36px 10px 8px;display:flex;flex-direction:column;gap:8px}
+#log::-webkit-scrollbar{width:4px}
+#log::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:4px}
+.m{max-width:88%;align-self:flex-start;padding:2px 0 2px 10px;border-left:2px solid rgba(63,185,80,.68);border-radius:2px;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.52;color:var(--loom-text)}
+.m.you{max-width:78%;align-self:flex-end;padding:6px 9px;border:1px solid rgba(88,166,255,.32);border-radius:12px 12px 3px 12px;background:rgba(88,166,255,.11);box-shadow:inset 0 1px rgba(255,255,255,.055);color:var(--loom-text);text-align:left}
+.m.error{padding-left:10px;border-left-color:var(--loom-danger);color:var(--loom-danger)}
+.m.stream::after{content:'▍';margin-left:2px;color:#bc8cff;animation:blink 1s step-end infinite}
+#activity{display:flex;align-items:center;gap:7px;min-height:18px;padding:0 10px 6px 18px;color:var(--loom-muted);font-size:11px;letter-spacing:.01em}
+#activity i{width:6px;height:6px;border-radius:50%;background:#bc8cff;animation:pulse 1.2s ease-in-out infinite}
+#composer{display:flex;align-items:flex-end;gap:7px;margin:0 6px 2px;padding:6px 7px 6px 11px;border:1px solid rgba(255,255,255,.12);border-radius:13px;background:rgba(255,255,255,.045)}
+#in{flex:1;min-width:0;max-height:60px;resize:none;overflow-y:auto;border:0;outline:0;background:transparent;color:#e6edf3;font:13px/1.45 -apple-system,'SF Pro Text',system-ui;padding:2px 0}
+#in::placeholder{color:#69717c}
+#go{width:26px;height:26px;flex:0 0 26px;border:0;border-radius:50%;background:#e6edf3;color:#11151b;font-size:15px;line-height:1;cursor:pointer}
+#go:disabled{opacity:.35;cursor:default}
+#setup{height:100%;padding:17px 15px;display:flex;flex-direction:column;gap:9px;overflow-y:auto}
+#setup h1{margin:0;font-size:17px;line-height:1.2}
+#setup p{margin:0;color:var(--loom-muted);font-size:12px;line-height:1.42}
+#url{width:100%;border:1px solid rgba(255,255,255,.16);border-radius:9px;background:rgba(255,255,255,.055);color:var(--loom-text);font:12px/1.35 ui-monospace,SFMono-Regular,monospace;padding:8px;outline:0}
+#url:focus{border-color:rgba(88,166,255,.72)}
+#url::placeholder{color:#69717c}
+#setup-actions{display:flex;gap:7px;align-items:center}
+#test,#save,#back{border:0;border-radius:8px;padding:6px 9px;font:12px -apple-system,'SF Pro Text',system-ui;cursor:pointer}
+#test,#back{background:rgba(255,255,255,.10);color:var(--loom-text)}
+#save{background:#e6edf3;color:#11151b;font-weight:600}
+#setup-status{min-height:18px;font-size:11px;color:var(--loom-muted)}
+#setup-status.ok{color:var(--loom-being)}
+#setup-status.err{color:var(--loom-danger)}
+@keyframes blink{50%{opacity:0}}
+@keyframes pulse{0%,100%{opacity:.35;transform:scale(1)}50%{opacity:1;transform:scale(1.35)}}
+@media (prefers-reduced-motion:reduce){#activity i,.m.stream::after{animation:none}}
+</style>
+
+<main class="shell">
+  <section id="setup" class="hidden" aria-label="连接 Being">
+    <button id="back" type="button" hidden>‹ 返回对话</button>
+    <h1>连接 Being</h1>
+    <p>粘贴 Loom 里的完整 Being URL（含 token）。它只保存在这台 Mac，Atoll 不会收到 token。</p>
+    <input id="url" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://your-being-host/?token=…" aria-label="Being URL">
+    <div id="setup-actions"><button id="test" type="button">测试连接</button><button id="save" type="button">保存并连接</button></div>
+    <div id="setup-status" role="status"></div>
+  </section>
+  <section id="chat" class="hidden" aria-label="Soul 对话">
+    <button id="gear" type="button" aria-label="设置 Being">⚙</button>
+    <section id="log" aria-label="Soul 对话"></section>
+    <div id="activity" hidden><i></i><span></span></div>
+    <form id="composer"><textarea id="in" rows="1" maxlength="8000" placeholder="问 Soul…" aria-label="给 Soul 发消息"></textarea><button id="go" type="submit" aria-label="发送">↑</button></form>
+  </section>
+</main>
+
+<script>
+const API='http://127.0.0.1:{{PORT}}',SETUP_KEY='{{SETUP_KEY}}',setupHeaders={'X-Being-Notch-Setup':SETUP_KEY},log=document.getElementById('log'),input=document.getElementById('in'),go=document.getElementById('go'),activity=document.getElementById('activity'),setup=document.getElementById('setup'),chat=document.getElementById('chat'),urlField=document.getElementById('url'),testButton=document.getElementById('test'),saveButton=document.getElementById('save'),settingsStatus=document.getElementById('setup-status'),backButton=document.getElementById('back'),gear=document.getElementById('gear'),draftDelay=160;
+var busy=false,sessionId='',replyNode=null,replyText='',sawReply=false;
+var draftTimer=null,draftEdited=false,configured=false;
+const pause=ms=>new Promise(r=>setTimeout(r,ms));
+const nearEnd=()=>log.scrollHeight-log.scrollTop-log.clientHeight<56;
+function scrollEnd(){log.scrollTop=log.scrollHeight}
+function add(text,kind='being',follow=true){const stick=follow&&nearEnd(),node=document.createElement('article');node.className='m '+kind;node.textContent=text;log.append(node);if(stick)scrollEnd();return node}
+function showActivity(text=''){activity.hidden=!text;activity.querySelector('span').textContent=text}
+function resize(){input.style.height='auto';input.style.height=Math.min(Math.max(input.scrollHeight,24),60)+'px'}
+function showSetup(message='',kind=''){chat.classList.add('hidden');setup.classList.remove('hidden');backButton.hidden=!configured;setSettingsStatus(message,kind);urlField.focus()}
+function showChat(){setup.classList.add('hidden');chat.classList.remove('hidden');input.focus()}
+function setSettingsStatus(message='',kind=''){settingsStatus.textContent=message;settingsStatus.className=kind?' '+kind:''}
+async function configure(save){const raw=urlField.value.trim();if(!raw){setSettingsStatus('请先粘贴完整 Being URL。','err');return}testButton.disabled=true;saveButton.disabled=true;setSettingsStatus(save?'正在保存并验证…':'正在验证…');try{const r=await fetch(API+(save?'/settings':'/settings/test'),{method:save?'PUT':'POST',headers:{...setupHeaders,'Content-Type':'application/json'},body:JSON.stringify({url:raw})}),data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'无法连接 Being');if(!save){setSettingsStatus('已连接 '+data.name+'，现在可以保存。','ok');return}urlField.value='';configured=true;setSettingsStatus('已连接 '+data.name+'。','ok');setTimeout(async()=>{showChat();try{await loadHistory()}catch(e){add('暂时无法读取 Loom 历史。','error')}loadDraft().catch(()=>{})},180)}catch(error){setSettingsStatus(error.message||'无法连接 Being。','err')}finally{testButton.disabled=false;saveButton.disabled=false}}
+async function boot(){try{const r=await fetch(API+'/settings',{headers:setupHeaders}),data=await r.json();configured=!!data.configured;if(!configured){showSetup('先连接你的 Being，再开始对话。');return}showChat();await loadHistory();loadDraft().catch(()=>{})}catch(error){showSetup('暂时无法读取本机设置。','err')}}
+function persistDraft(){if(draftTimer){clearTimeout(draftTimer);draftTimer=null}fetch(API+'/draft',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({draft:input.value}),keepalive:true}).catch(()=>{})}
+function scheduleDraftSave(){if(draftTimer)clearTimeout(draftTimer);draftTimer=setTimeout(persistDraft,draftDelay)}
+async function loadDraft(){const r=await fetch(API+'/draft');if(!r.ok)throw Error('无法读取草稿');const data=await r.json();if(!draftEdited&&!input.value&&typeof data.draft==='string'){input.value=data.draft;resize()}}
+function messages(data){const list=Array.isArray(data)?data:(data.messages||data.items||[]);return Array.isArray(list)?list:[]}
+function role(item){return item.role==='user'||item.role==='human'?'you':'being'}
+async function loadHistory(){const r=await fetch(API+'/history');if(!r.ok)throw Error('无法读取 Loom 历史');const data=await r.json();log.replaceChildren();messages(data).slice(-12).forEach(x=>add(x.content||x.text||'',role(x),false));scrollEnd()}
+function delta(data){const d=data&&data.delta;return typeof d?.text==='string'?d.text:typeof d==='string'?d:typeof data?.text==='string'?data.text:typeof data?.content==='string'?data.content:''}
+function finishReply(data){if(data&&typeof data.session_id==='string')sessionId=data.session_id;if(replyNode){replyNode.classList.remove('stream');replyNode=null;replyText=''}}
+function apply(type,data={}){
+  if(type==='thinking'||type==='reasoning'){showActivity('Being 在思考');return}
+  if(type==='tool_use'||type==='tool_result'){showActivity('Being 在行动');return}
+  if(type==='content_block_delta'||type==='text'){showActivity('Being 在回复');const text=delta(data);if(!replyNode){replyNode=add('', 'being stream');replyText=''}if(text){const stick=nearEnd();replyText+=text;replyNode.textContent=replyText;if(stick)scrollEnd();sawReply=true}return}
+  if(type==='message_stop'){finishReply(data);return}
+  if(type==='error')throw Error(data.message||'Being 的回复中断')
+}
+async function consume(body){
+  if(!body)return false;const reader=body.getReader(),decoder=new TextDecoder();let pending='',type='',lines=[],accepted=false;
+  const emit=()=>{if(!type){lines=[];return}let data={};try{data=JSON.parse(lines.join('\n')||'{}')}catch(e){}if(type==='meta'&&data.accepted)accepted=true;else apply(type,data);type='';lines=[]};
+  const line=value=>{if(!value){emit();return}if(value.startsWith(':'))return;const i=value.indexOf(':'),key=i<0?value:value.slice(0,i),raw=i<0?'':value.slice(i+1).replace(/^ /,'');if(key==='event')type=raw;if(key==='data')lines.push(raw)};
+  while(true){const part=await reader.read();if(part.done)break;pending+=decoder.decode(part.value,{stream:true});const rows=pending.split(/\r?\n/);pending=rows.pop();rows.forEach(line)}
+  pending+=decoder.decode();if(pending)line(pending);emit();return accepted;
+}
+async function followAccepted(){
+  let cursor=0,empty=0;
+  for(let attempt=0;attempt<240;attempt++){
+    const r=await fetch(API+'/active?after='+cursor);if(r.status===204){if(++empty>6){await loadHistory();return}await pause(350);continue}if(!r.ok)throw Error('无法接续 Loom 回复');
+    const active=await r.json(),events=Array.isArray(active.events)?active.events:[];empty=0;
+    for(const event of events){if(Number.isInteger(event.seq)&&event.seq>cursor)cursor=event.seq;apply(event.event||event.type,event.data||{})}
+    if(active.finished){await loadHistory();return}
+    await pause(events.length?220:420);
+  }
+  throw Error('等待 Loom 回复超时')
+}
+async function send(){
+  const raw=input.value,text=raw.trim();if(!text||busy)return;busy=true;go.disabled=true;sawReply=false;let delivered=false;add(text,'you');input.value='';persistDraft();resize();showActivity('正在发送');
+  try{
+    const body={message:text};if(sessionId)body.session_id=sessionId;
+    const r=await fetch(API+'/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error('发送失败');delivered=true;
+    const accepted=await consume(r.body);if(accepted)await followAccepted();else if(!sawReply)await loadHistory();
+  }catch(error){if(!delivered){input.value=raw;persistDraft();resize()}finishReply();add('⚠ '+(error.message||'发送失败'),'error')}
+  finally{finishReply();busy=false;go.disabled=false;showActivity('');input.focus()}
+}
+document.getElementById('composer').addEventListener('submit',e=>{e.preventDefault();send()});
+input.addEventListener('input',()=>{draftEdited=true;resize();scheduleDraftSave()});input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send()}});
+testButton.addEventListener('click',()=>configure(false));saveButton.addEventListener('click',()=>configure(true));gear.addEventListener('click',()=>showSetup());backButton.addEventListener('click',showChat);
+// 发出后 composer 是空的：鼠标离开时释放焦点，让 Atoll 收回到实时状态药丸。
+// 但有未发送草稿时不 blur，焦点桥会保住它，避免用户只是移动鼠标就丢字。
+window.addEventListener('mouseleave',()=>{if(!chat.classList.contains('hidden')&&!input.value.trim())input.blur()});
+window.addEventListener('pagehide',persistDraft);
+boot();resize();
+</script>
+"""#
