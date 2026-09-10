@@ -40,10 +40,9 @@ body{font-family:-apple-system,'SF Pro Text',system-ui;color:var(--loom-text)}
 #in::placeholder{color:#69717c}
 #go{width:26px;height:26px;flex:0 0 26px;border:0;border-radius:50%;background:#e6edf3;color:#11151b;font-size:15px;line-height:1;cursor:pointer}
 #go:disabled{opacity:.35;cursor:default}
-#setup{height:100%;padding:17px 15px;display:flex;flex-direction:column;gap:9px;overflow-y:auto}
-#setup h1{margin:0;font-size:17px;line-height:1.2}
-#setup p{margin:0;color:var(--loom-muted);font-size:12px;line-height:1.42}
-#url{width:100%;border:1px solid rgba(255,255,255,.16);border-radius:9px;background:rgba(255,255,255,.055);color:var(--loom-text);font:12px/1.35 ui-monospace,SFMono-Regular,monospace;padding:8px;outline:0}
+#setup{height:100%;padding:11px 15px;display:flex;flex-direction:column;gap:7px;overflow-y:auto}
+#setup p{margin:0;color:var(--loom-muted);font-size:12px;line-height:1.38}
+#url{width:100%;border:1px solid rgba(255,255,255,.16);border-radius:9px;background:rgba(255,255,255,.055);color:var(--loom-text);font:12px/1.35 ui-monospace,SFMono-Regular,monospace;padding:7px 8px;outline:0}
 #url:focus{border-color:rgba(88,166,255,.72)}
 #url::placeholder{color:#69717c}
 #setup-actions{display:flex;gap:7px;align-items:center}
@@ -61,8 +60,7 @@ body{font-family:-apple-system,'SF Pro Text',system-ui;color:var(--loom-text)}
 <main class="shell">
   <section id="setup" class="hidden" aria-label="连接 Being">
     <button id="back" type="button" hidden>‹ 返回对话</button>
-    <h1>连接 Being</h1>
-    <p>粘贴 Loom 里的完整 Being URL（含 token）。它只保存在这台 Mac，Atoll 不会收到 token。</p>
+    <p>粘贴 Loom 中的完整 Being URL（含 token）。只保存在这台 Mac，Atoll 不会收到 token。</p>
     <input id="url" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://your-being-host/?token=…" aria-label="Being URL">
     <div id="setup-actions"><button id="test" type="button">测试连接</button><button id="save" type="button">保存并连接</button></div>
     <div id="setup-status" role="status"></div>

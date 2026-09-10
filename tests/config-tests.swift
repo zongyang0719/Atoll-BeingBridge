@@ -45,6 +45,8 @@ struct ConfigTests {
                        "chat page does not expose the in-tab setup flow")
             try expect(page.contains("X-Being-Notch-Setup") && !page.contains("{{SETUP_KEY}}"),
                        "chat page does not protect its setup route")
+            try expect(!page.contains("<h1>"),
+                       "setup page repeats the native tab title and wastes its small viewport")
 
             print("config tests passed")
         } catch {
