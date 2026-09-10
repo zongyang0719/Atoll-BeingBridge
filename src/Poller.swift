@@ -167,7 +167,7 @@ final class BeingPoller {
 
     private func setNeedsSetup() {
         mutate {
-            $0.name = "Being"
+            $0.name = BeingState.setupName
             $0.activity = .setup
             $0.model = ""
             $0.activityDetail = ""

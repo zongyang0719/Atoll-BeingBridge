@@ -48,7 +48,10 @@ struct RGB {
 }
 
 struct BeingState: Equatable {
-    var name = "Being"
+    /// 未连接前不假定用户的 Being 名称；连接成功后由 /api/status 的 being_name 覆盖。
+    static let setupName = "连接 Being"
+
+    var name = BeingState.setupName
     var activity: Activity = .offline
     var model = ""
     var sbsEnabled = true
