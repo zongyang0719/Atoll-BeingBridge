@@ -59,12 +59,12 @@ chmod 755 "$PACKAGE_DIR/bin/being-notch" "$PACKAGE_DIR/install.sh" "$PACKAGE_DIR
     /usr/bin/zip -qry "$ASSET_PATH" "$PACKAGE_NAME"
 )
 unzip -t "$ASSET_PATH" >/dev/null
-if zipinfo -1 "$ASSET_PATH" | rg -q '^__MACOSX/|(^|/)\._|(^|/)\.DS_Store$'; then
+if zipinfo -1 "$ASSET_PATH" | grep -E -q '^__MACOSX/|(^|/)\._|(^|/)\.DS_Store$'; then
   echo "release archive contains Finder metadata"
   exit 1
 fi
 for required in install.command install.sh PREBUILT bin/being-notch resources/io.github.beingnotch.bridge.plist README.md; do
-  if ! zipinfo -1 "$ASSET_PATH" | rg -q "^$PACKAGE_NAME/$required$"; then
+  if ! zipinfo -1 "$ASSET_PATH" | grep -E -q "^$PACKAGE_NAME/$required$"; then
     echo "release archive is missing: $required"
     exit 1
   fi

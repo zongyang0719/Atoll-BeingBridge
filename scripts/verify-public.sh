@@ -18,8 +18,8 @@ cp "$ROOT/resources/io.github.beingnotch.bridge.plist" "$PLIST_PROBE"
 plutil -replace ProgramArguments -xml '<array><string>/tmp/being-notch</string></array>' "$PLIST_PROBE"
 if [[ "$(plutil -extract ProgramArguments raw "$PLIST_PROBE")" != "1" ]] || \
   [[ "$(plutil -extract ProgramArguments.0 raw "$PLIST_PROBE")" != "/tmp/being-notch" ]] || \
-  ! rg -q 'plutil -replace ProgramArguments -xml' "$ROOT/install.sh" || \
-  ! rg -q 'EUID.*eq 0' "$ROOT/install.sh"; then
+  ! grep -q 'plutil -replace ProgramArguments -xml' "$ROOT/install.sh" || \
+  ! grep -E -q 'EUID.*eq 0' "$ROOT/install.sh"; then
   echo "installer does not render exactly one bridge argument"
   exit 1
 fi
@@ -28,15 +28,16 @@ RETIRED_PROVIDER="open""router"
 PRIVATE_HOME="/""Users/"
 LEGACY_DIRECTORY=".mtmr-""cards"
 PERSONAL_LABEL="com.""marvic"
-if rg -n -i "$RETIRED_PROVIDER|$PRIVATE_HOME|$LEGACY_DIRECTORY|$PERSONAL_LABEL" \
-  "$ROOT/src" "$ROOT/resources" "$ROOT/install.sh" "$ROOT/build.sh" "$ROOT/scripts" \
-  -g '!release-notes.md'; then
+if grep -R -n -E -i "$RETIRED_PROVIDER|$PRIVATE_HOME|$LEGACY_DIRECTORY|$PERSONAL_LABEL" \
+  "$ROOT/src" "$ROOT/resources" "$ROOT/install.sh" "$ROOT/build.sh" \
+  "$ROOT/scripts/package-release.sh" "$ROOT/scripts/test.sh" "$ROOT/scripts/verify-public.sh"; then
   echo "private or retired identifier remains"
   exit 1
 fi
 
-if rg -l -e 'sk-[A-Za-z0-9_-]{12,}|bearer[[:space:]]+[A-Za-z0-9._-]{12,}' "$ROOT" \
-  -g '!.git/**' -g '!bin/**' -g '!build/**' -g '!*.app/**'; then
+if find "$ROOT" \
+  \( -path "$ROOT/.git" -o -path "$ROOT/bin" -o -path "$ROOT/build" -o -path "$ROOT/dist" -o -name '*.app' \) -prune -o \
+  -type f -exec grep -l -E 'sk-[A-Za-z0-9_-]{12,}|bearer[[:space:]]+[A-Za-z0-9._-]{12,}' {} + | grep -q .; then
   echo "possible literal secret in source files"
   exit 1
 fi
@@ -52,7 +53,7 @@ env CLANG_MODULE_CACHE_PATH="$MODULE_CACHE" SWIFT_MODULE_CACHE_PATH="$MODULE_CAC
 env CLANG_MODULE_CACHE_PATH="$MODULE_CACHE" SWIFT_MODULE_CACHE_PATH="$MODULE_CACHE" \
   swiftc -O -target x86_64-apple-macosx14.0 "$ROOT"/src/*.swift -o "$VERIFY_X86_64"
 lipo -create "$VERIFY_ARM64" "$VERIFY_X86_64" -output "$VERIFY_BIN"
-if ! lipo -archs "$VERIFY_BIN" | rg -q 'arm64.*x86_64|x86_64.*arm64'; then
+if ! lipo -archs "$VERIFY_BIN" | grep -E -q 'arm64.*x86_64|x86_64.*arm64'; then
   echo "universal binary is missing a required architecture"
   exit 1
 fi
