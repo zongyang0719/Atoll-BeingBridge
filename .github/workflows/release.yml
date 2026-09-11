@@ -13,7 +13,17 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - run: zsh scripts/verify-public.sh
+      - name: Verify public package
+        shell: zsh
+        run: |
+          if zsh scripts/verify-public.sh > verification.log 2>&1; then
+            cat verification.log
+          else
+            cat verification.log
+            failure="$(tail -n 20 verification.log | tr '\n' ' ')"
+            echo "::error title=Public verification failed::$failure"
+            exit 1
+          fi
       - run: zsh scripts/package-release.sh "$GITHUB_REF_NAME"
       - name: Create GitHub release
         env:
