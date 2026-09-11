@@ -83,8 +83,10 @@ function scrollEnd(){log.scrollTop=log.scrollHeight}
 function add(text,kind='being',follow=true){const stick=follow&&nearEnd(),node=document.createElement('article');node.className='m '+kind;node.textContent=text;log.append(node);if(stick)scrollEnd();return node}
 function showActivity(text=''){activity.hidden=!text;activity.querySelector('span').textContent=text}
 function resize(){input.style.height='auto';input.style.height=Math.min(Math.max(input.scrollHeight,24),60)+'px'}
-function showSetup(message='',kind=''){chat.classList.add('hidden');setup.classList.remove('hidden');backButton.hidden=!configured;setSettingsStatus(message,kind);urlField.focus()}
-function showChat(){setup.classList.add('hidden');chat.classList.remove('hidden');input.focus()}
+function blurActiveElement(){const active=document.activeElement;if(active&&active!==document.body&&active!==document.documentElement&&typeof active.blur==='function')active.blur()}
+function releaseWebFocus(){persistDraft();blurActiveElement()}
+function showSetup(message='',kind=''){blurActiveElement();chat.classList.add('hidden');setup.classList.remove('hidden');backButton.hidden=!configured;setSettingsStatus(message,kind)}
+function showChat(){blurActiveElement();setup.classList.add('hidden');chat.classList.remove('hidden')}
 function setSettingsStatus(message='',kind=''){settingsStatus.textContent=message;settingsStatus.className=kind?' '+kind:''}
 async function configure(save){const raw=urlField.value.trim();if(!raw){setSettingsStatus('请先粘贴完整 Being URL。','err');return}testButton.disabled=true;saveButton.disabled=true;setSettingsStatus(save?'正在保存并验证…':'正在验证…');try{const r=await fetch(API+(save?'/settings':'/settings/test'),{method:save?'PUT':'POST',headers:{...setupHeaders,'Content-Type':'application/json'},body:JSON.stringify({url:raw})}),data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'无法连接 Being');if(!save){setSettingsStatus('已连接 '+data.name+'，现在可以保存。','ok');return}urlField.value='';configured=true;setSettingsStatus('已连接 '+data.name+'。','ok');setTimeout(async()=>{showChat();try{await loadHistory()}catch(e){add('暂时无法读取 Loom 历史。','error')}loadDraft().catch(()=>{})},180)}catch(error){setSettingsStatus(error.message||'无法连接 Being。','err')}finally{testButton.disabled=false;saveButton.disabled=false}}
 async function boot(){try{const r=await fetch(API+'/settings',{headers:setupHeaders}),data=await r.json();configured=!!data.configured;if(!configured){showSetup('先连接你的 Being，再开始对话。');return}showChat();await loadHistory();loadDraft().catch(()=>{})}catch(error){showSetup('暂时无法读取本机设置。','err')}}
@@ -128,14 +130,14 @@ async function send(){
     const r=await fetch(API+'/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error('发送失败');delivered=true;
     const accepted=await consume(r.body);if(accepted)await followAccepted();else if(!sawReply)await loadHistory();
   }catch(error){if(!delivered){input.value=raw;persistDraft();resize()}finishReply();add('⚠ '+(error.message||'发送失败'),'error')}
-  finally{finishReply();busy=false;go.disabled=false;showActivity('');input.focus()}
+  finally{finishReply();busy=false;go.disabled=false;showActivity('')}
 }
 document.getElementById('composer').addEventListener('submit',e=>{e.preventDefault();send()});
 input.addEventListener('input',()=>{draftEdited=true;resize();scheduleDraftSave()});input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send()}});
 testButton.addEventListener('click',()=>configure(false));saveButton.addEventListener('click',()=>configure(true));gear.addEventListener('click',()=>showSetup());backButton.addEventListener('click',showChat);
-// 发出后 composer 是空的：鼠标离开时释放焦点，让 Atoll 收回到实时状态药丸。
-// 但有未发送草稿时不 blur，焦点桥会保住它，避免用户只是移动鼠标就丢字。
-window.addEventListener('mouseleave',()=>{if(!chat.classList.contains('hidden')&&!input.value.trim())input.blur()});
+// 草稿先落盘，再释放当前控件（包括按钮）的焦点。这样 Atoll 可以收回，
+// 下一次展开时仍会从本机服务恢复未发送内容。
+window.addEventListener('mouseleave',releaseWebFocus);
 window.addEventListener('pagehide',persistDraft);
 boot();resize();
 </script>

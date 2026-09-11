@@ -47,6 +47,12 @@ struct ConfigTests {
                        "chat page does not protect its setup route")
             try expect(!page.contains("<h1>"),
                        "setup page repeats the native tab title and wastes its small viewport")
+            try expect(!page.contains(".focus()"),
+                       "chat page automatically focuses a control and keeps Atoll expanded")
+            try expect(page.contains("window.addEventListener('mouseleave',releaseWebFocus)"),
+                       "chat page does not release web focus after the pointer leaves")
+            try expect(page.contains("function releaseWebFocus(){persistDraft();blurActiveElement()}"),
+                       "leaving the panel can discard an unsent draft before Atoll closes")
 
             let neutralTab = notchDescriptor(
                 BeingState(name: "Soul", activity: .idle),
