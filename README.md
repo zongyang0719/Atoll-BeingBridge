@@ -44,6 +44,11 @@ host. It is not an Atoll fork and does not install a second settings app.
 - 选中 Being tab 的导航图标与 Atoll 原生 tab 一样使用白色；状态颜色仅用于
   思考药丸和内容状态。
 - 输入框内容在 hover 收起、WebView 重建后会恢复；bridge 重启前不会写入 Being。
+- Soul 遵循 Loom 的 scene 规则，使用 `atoll-{beingName}` 作为独立会话；不会混入
+  Desktop / Workbench 的对话。旧消息或自主呼吸没有 `scene_id` 时，仍按 Loom 的
+  兼容规则显示。
+- 被 Being 以 `202 Accepted` 排队的消息会从 2 秒逐步退避到最多 30 秒，并持续核对
+  active stream 与历史最多 5 分钟；系统 marker 显示为分隔提示，不伪装成对话气泡。
 - OpenRouter 不在本项目范围内，也不会被读取或配置。
 
 ## 安全与本地数据

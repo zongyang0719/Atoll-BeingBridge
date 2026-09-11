@@ -110,3 +110,13 @@ struct BeingState: Equatable {
         }
     }
 }
+
+/// Loom 的 scene 以 Being 名称区分，而不是以 host、URL 或 token 区分。Atoll 是独立
+/// 对话面，因此用自己的前缀；名称本身保留，以便每个用户自然落到自己的 scene。
+func atollSceneID(for beingName: String) -> String? {
+    let name = beingName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !name.isEmpty,
+          name != BeingState.setupName,
+          name.utf8.count <= 240 else { return nil }
+    return "atoll-\(name)"
+}

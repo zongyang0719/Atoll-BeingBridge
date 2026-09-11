@@ -39,6 +39,13 @@ struct ConfigTests {
             let mode = (attributes[.posixPermissions] as? NSNumber)?.intValue ?? 0o777
             try expect((mode & 0o077) == 0, "secret file is readable by group or others")
 
+            try expect(atollSceneID(for: "Soul") == "atoll-Soul",
+                       "Atoll scene ID does not use the Being name")
+            try expect(atollSceneID(for: "  溯  ") == "atoll-溯",
+                       "Atoll scene ID does not preserve each user's normalized Being name")
+            try expect(atollSceneID(for: BeingState.setupName) == nil,
+                       "unconfigured bridge created a fake conversation scene")
+
             let page = chatHTML(port: 9021, setupKey: "test-setup-key")
             try expect(page.utf8.count < 20_000, "embedded chat page exceeds Atoll's size limit")
             try expect(page.contains("/settings/test") && page.contains("/settings"),
@@ -53,6 +60,14 @@ struct ConfigTests {
                        "chat page does not release web focus after the pointer leaves")
             try expect(page.contains("function releaseWebFocus(){persistDraft();blurActiveElement()}"),
                        "leaving the panel can discard an unsent draft before Atoll closes")
+            try expect(page.contains("function inMyScene(item)"),
+                       "chat page does not isolate the Atoll conversation scene")
+            try expect(page.contains("function isHistoryMarker(item)"),
+                       "chat page renders Loom markers as ordinary messages")
+            try expect(page.contains("CATCH_UP_ABSOLUTE_MAX_MS=5*60*1000"),
+                       "accepted 202 replies stop before Loom's catch-up window")
+            try expect(page.contains("body.scene_id=sceneId"),
+                       "chat page does not identify its conversation scene to the local bridge")
 
             let neutralTab = notchDescriptor(
                 BeingState(name: "Soul", activity: .idle),

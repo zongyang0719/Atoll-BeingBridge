@@ -32,6 +32,7 @@ body{font-family:-apple-system,'SF Pro Text',system-ui;color:var(--loom-text)}
 .m{max-width:88%;align-self:flex-start;padding:2px 0 2px 10px;border-left:2px solid rgba(63,185,80,.68);border-radius:2px;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.52;color:var(--loom-text)}
 .m.you{max-width:78%;align-self:flex-end;padding:6px 9px;border:1px solid rgba(88,166,255,.32);border-radius:12px 12px 3px 12px;background:rgba(88,166,255,.11);box-shadow:inset 0 1px rgba(255,255,255,.055);color:var(--loom-text);text-align:left}
 .m.error{padding-left:10px;border-left-color:var(--loom-danger);color:var(--loom-danger)}
+.marker{align-self:stretch;padding:3px 0;color:var(--loom-muted);font-size:10px;text-align:center;opacity:.76}
 .m.stream::after{content:'▍';margin-left:2px;color:#bc8cff;animation:blink 1s step-end infinite}
 #activity{display:flex;align-items:center;gap:7px;min-height:18px;padding:0 10px 6px 18px;color:var(--loom-muted);font-size:11px;letter-spacing:.01em}
 #activity i{width:6px;height:6px;border-radius:50%;background:#bc8cff;animation:pulse 1.2s ease-in-out infinite}
@@ -75,7 +76,8 @@ body{font-family:-apple-system,'SF Pro Text',system-ui;color:var(--loom-text)}
 
 <script>
 const API='http://127.0.0.1:{{PORT}}',SETUP_KEY='{{SETUP_KEY}}',setupHeaders={'X-Being-Notch-Setup':SETUP_KEY},log=document.getElementById('log'),input=document.getElementById('in'),go=document.getElementById('go'),activity=document.getElementById('activity'),setup=document.getElementById('setup'),chat=document.getElementById('chat'),urlField=document.getElementById('url'),testButton=document.getElementById('test'),saveButton=document.getElementById('save'),settingsStatus=document.getElementById('setup-status'),backButton=document.getElementById('back'),gear=document.getElementById('gear'),draftDelay=160;
-var busy=false,sessionId='',replyNode=null,replyText='',sawReply=false;
+const CATCH_UP_INITIAL_MS=2000,CATCH_UP_MAX_MS=30000,CATCH_UP_ABSOLUTE_MAX_MS=5*60*1000;
+var busy=false,sessionId='',replyNode=null,replyText='',sawReply=false,sceneId='',historyBeingSignature='';
 var draftTimer=null,draftEdited=false,configured=false;
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 const nearEnd=()=>log.scrollHeight-log.scrollTop-log.clientHeight<56;
@@ -88,45 +90,58 @@ function releaseWebFocus(){persistDraft();blurActiveElement()}
 function showSetup(message='',kind=''){blurActiveElement();chat.classList.add('hidden');setup.classList.remove('hidden');backButton.hidden=!configured;setSettingsStatus(message,kind)}
 function showChat(){blurActiveElement();setup.classList.add('hidden');chat.classList.remove('hidden')}
 function setSettingsStatus(message='',kind=''){settingsStatus.textContent=message;settingsStatus.className=kind?' '+kind:''}
-async function configure(save){const raw=urlField.value.trim();if(!raw){setSettingsStatus('请先粘贴完整 Being URL。','err');return}testButton.disabled=true;saveButton.disabled=true;setSettingsStatus(save?'正在保存并验证…':'正在验证…');try{const r=await fetch(API+(save?'/settings':'/settings/test'),{method:save?'PUT':'POST',headers:{...setupHeaders,'Content-Type':'application/json'},body:JSON.stringify({url:raw})}),data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'无法连接 Being');if(!save){setSettingsStatus('已连接 '+data.name+'，现在可以保存。','ok');return}urlField.value='';configured=true;setSettingsStatus('已连接 '+data.name+'。','ok');setTimeout(async()=>{showChat();try{await loadHistory()}catch(e){add('暂时无法读取 Loom 历史。','error')}loadDraft().catch(()=>{})},180)}catch(error){setSettingsStatus(error.message||'无法连接 Being。','err')}finally{testButton.disabled=false;saveButton.disabled=false}}
-async function boot(){try{const r=await fetch(API+'/settings',{headers:setupHeaders}),data=await r.json();configured=!!data.configured;if(!configured){showSetup('先连接你的 Being，再开始对话。');return}showChat();await loadHistory();loadDraft().catch(()=>{})}catch(error){showSetup('暂时无法读取本机设置。','err')}}
+function setScene(data={}){const id=data&&data.scene_id,name=data&&data.name;if(typeof id==='string'&&id.startsWith('atoll-')){sceneId=id;return}if(typeof name==='string'&&name.trim()&&name!=="连接 Being")sceneId='atoll-'+name.trim()}
+async function refreshScene(){try{const r=await fetch(API+'/state');if(r.ok)setScene(await r.json())}catch(_){} }
+async function configure(save){const raw=urlField.value.trim();if(!raw){setSettingsStatus('请先粘贴完整 Being URL。','err');return}testButton.disabled=true;saveButton.disabled=true;setSettingsStatus(save?'正在保存并验证…':'正在验证…');try{const r=await fetch(API+(save?'/settings':'/settings/test'),{method:save?'PUT':'POST',headers:{...setupHeaders,'Content-Type':'application/json'},body:JSON.stringify({url:raw})}),data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'无法连接 Being');if(!save){setSettingsStatus('已连接 '+data.name+'，现在可以保存。','ok');return}setScene(data);urlField.value='';configured=true;setSettingsStatus('已连接 '+data.name+'。','ok');setTimeout(async()=>{showChat();try{await loadHistory()}catch(e){add('暂时无法读取 Loom 历史。','error')}loadDraft().catch(()=>{})},180)}catch(error){setSettingsStatus(error.message||'无法连接 Being。','err')}finally{testButton.disabled=false;saveButton.disabled=false}}
+async function boot(){try{const r=await fetch(API+'/settings',{headers:setupHeaders}),data=await r.json();configured=!!data.configured;setScene(data);if(!configured){showSetup('先连接你的 Being，再开始对话。');return}await refreshScene();showChat();await loadHistory();loadDraft().catch(()=>{})}catch(error){showSetup('暂时无法读取本机设置。','err')}}
 function persistDraft(){if(draftTimer){clearTimeout(draftTimer);draftTimer=null}fetch(API+'/draft',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({draft:input.value}),keepalive:true}).catch(()=>{})}
 function scheduleDraftSave(){if(draftTimer)clearTimeout(draftTimer);draftTimer=setTimeout(persistDraft,draftDelay)}
 async function loadDraft(){const r=await fetch(API+'/draft');if(!r.ok)throw Error('无法读取草稿');const data=await r.json();if(!draftEdited&&!input.value&&typeof data.draft==='string'){input.value=data.draft;resize()}}
 function messages(data){const list=Array.isArray(data)?data:(data.messages||data.items||[]);return Array.isArray(list)?list:[]}
 function role(item){return item.role==='user'||item.role==='human'?'you':'being'}
-async function loadHistory(){const r=await fetch(API+'/history');if(!r.ok)throw Error('无法读取 Loom 历史');const data=await r.json();log.replaceChildren();messages(data).slice(-12).forEach(x=>add(x.content||x.text||'',role(x),false));scrollEnd()}
+function inMyScene(item){const sid=item&&item.scene_id;return !sceneId||!sid||sid===sceneId}
+function isHistoryMarker(item){return !!item&&(item.from==='system'||item.type==='marker')}
+function contentOf(item){return typeof item?.content==='string'?item.content:typeof item?.text==='string'?item.text:''}
+function markerText(text){const raw=String(text||'').trim();if(raw.includes('breath yielded'))return '放下手头的事，转向你';if(raw.includes('interrupted'))return '已停止';if(raw.includes('superseded'))return '被新的对话取代';return raw.replace(/^\[|\]$/g,'')||'对话状态更新'}
+function addMarker(text,follow=true){const stick=follow&&nearEnd(),node=document.createElement('div');node.className='marker';node.textContent=markerText(text);log.append(node);if(stick)scrollEnd();return node}
+function historyKey(item,index){return [item.id||item.message_id||item.created_at||item.timestamp||index,item.role||item.from||'',contentOf(item)].join('\u001f')}
+function beingSignature(list){return list.filter(x=>!isHistoryMarker(x)&&role(x)==='being').map(historyKey).join('\u001e')}
+async function loadHistory(){const r=await fetch(API+'/history');if(!r.ok)throw Error('无法读取 Loom 历史');const data=await r.json(),list=messages(data).filter(inMyScene),signature=beingSignature(list),hasNewReply=!!historyBeingSignature&&signature!==historyBeingSignature;historyBeingSignature=signature;log.replaceChildren();list.slice(-12).forEach(x=>isHistoryMarker(x)?addMarker(contentOf(x),false):add(contentOf(x),role(x),false));scrollEnd();return hasNewReply}
 function delta(data){const d=data&&data.delta;return typeof d?.text==='string'?d.text:typeof d==='string'?d:typeof data?.text==='string'?data.text:typeof data?.content==='string'?data.content:''}
 function finishReply(data){if(data&&typeof data.session_id==='string')sessionId=data.session_id;if(replyNode){replyNode.classList.remove('stream');replyNode=null;replyText=''}}
 function apply(type,data={}){
+  if(type==='marker'){addMarker(delta(data)||data.message||'');return}
   if(type==='thinking'||type==='reasoning'){showActivity('Being 在思考');return}
   if(type==='tool_use'||type==='tool_result'){showActivity('Being 在行动');return}
   if(type==='content_block_delta'||type==='text'){showActivity('Being 在回复');const text=delta(data);if(!replyNode){replyNode=add('', 'being stream');replyText=''}if(text){const stick=nearEnd();replyText+=text;replyNode.textContent=replyText;if(stick)scrollEnd();sawReply=true}return}
   if(type==='message_stop'){finishReply(data);return}
   if(type==='error')throw Error(data.message||'Being 的回复中断')
 }
+function acceptsSceneEvent(type,data){return type==='meta'||type==='usage'||type==='error'||inMyScene(data)}
 async function consume(body){
   if(!body)return false;const reader=body.getReader(),decoder=new TextDecoder();let pending='',type='',lines=[],accepted=false;
-  const emit=()=>{if(!type){lines=[];return}let data={};try{data=JSON.parse(lines.join('\n')||'{}')}catch(e){}if(type==='meta'&&data.accepted)accepted=true;else apply(type,data);type='';lines=[]};
+  const emit=()=>{if(!type){lines=[];return}let data={};try{data=JSON.parse(lines.join('\n')||'{}')}catch(e){}if(type==='meta'&&data.accepted)accepted=true;else if(acceptsSceneEvent(type,data))apply(type,data);type='';lines=[]};
   const line=value=>{if(!value){emit();return}if(value.startsWith(':'))return;const i=value.indexOf(':'),key=i<0?value:value.slice(0,i),raw=i<0?'':value.slice(i+1).replace(/^ /,'');if(key==='event')type=raw;if(key==='data')lines.push(raw)};
   while(true){const part=await reader.read();if(part.done)break;pending+=decoder.decode(part.value,{stream:true});const rows=pending.split(/\r?\n/);pending=rows.pop();rows.forEach(line)}
   pending+=decoder.decode();if(pending)line(pending);emit();return accepted;
 }
 async function followAccepted(){
-  let cursor=0,empty=0;
-  for(let attempt=0;attempt<240;attempt++){
-    const r=await fetch(API+'/active?after='+cursor);if(r.status===204){if(++empty>6){await loadHistory();return}await pause(350);continue}if(!r.ok)throw Error('无法接续 Loom 回复');
-    const active=await r.json(),events=Array.isArray(active.events)?active.events:[];empty=0;
-    for(const event of events){if(Number.isInteger(event.seq)&&event.seq>cursor)cursor=event.seq;apply(event.event||event.type,event.data||{})}
-    if(active.finished){await loadHistory();return}
-    await pause(events.length?220:420);
+  let cursor=0,delay=CATCH_UP_INITIAL_MS,deadline=Date.now()+CATCH_UP_ABSOLUTE_MAX_MS;
+  while(Date.now()<deadline){
+    const r=await fetch(API+'/active?after='+cursor);
+    if(r.status===204){if(await loadHistory())return;await pause(delay);delay=Math.min(delay*2,CATCH_UP_MAX_MS);continue}
+    if(!r.ok)throw Error('无法接续 Loom 回复');
+    const active=await r.json(),events=Array.isArray(active.events)?active.events:[];
+    for(const event of events){if(Number.isInteger(event.seq)&&event.seq>cursor)cursor=event.seq;const type=event.event||event.type,data=event.data||{};if(acceptsSceneEvent(type,data))apply(type,data)}
+    if(active.finished){if(await loadHistory())return;await pause(delay);delay=Math.min(delay*2,CATCH_UP_MAX_MS);continue}
+    await pause(events.length?220:Math.min(delay,1000));
   }
-  throw Error('等待 Loom 回复超时')
+  await loadHistory()
 }
 async function send(){
   const raw=input.value,text=raw.trim();if(!text||busy)return;busy=true;go.disabled=true;sawReply=false;let delivered=false;add(text,'you');input.value='';persistDraft();resize();showActivity('正在发送');
   try{
-    const body={message:text};if(sessionId)body.session_id=sessionId;
+    const body={message:text};if(sessionId)body.session_id=sessionId;if(sceneId)body.scene_id=sceneId;
     const r=await fetch(API+'/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error('发送失败');delivered=true;
     const accepted=await consume(r.body);if(accepted)await followAccepted();else if(!sawReply)await loadHistory();
   }catch(error){if(!delivered){input.value=raw;persistDraft();resize()}finishReply();add('⚠ '+(error.message||'发送失败'),'error')}

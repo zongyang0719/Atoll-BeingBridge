@@ -25,6 +25,9 @@ final class LocalServer {
     /// 草稿属于当前 Soul 会话，但不属于一次 WKWebView 实例：hover 收起后重新
     /// 创建页面时仍可恢复。只留在这个回环 daemon 的内存中，不进 Being、不上网。
     private let draft = DraftBox()
+    /// 对话场景属于 Being 名称而不是 URL 或 token。它让 Atoll、Desktop、Workbench
+    /// 各自有独立上下文，同时仍允许 Loom 兼容旧的无 scene 消息。
+    private let scene = SceneBox()
 
     init?(port: UInt16, credentialsProvider: @escaping () -> BeingCredentials?, being: BeingPoller) {
         guard let p = NWEndpoint.Port(rawValue: port) else { return nil }
@@ -114,7 +117,11 @@ final class LocalServer {
                 do {
                     try Config.saveBeingURL(raw)
                     Config.load().write() // 只留下非敏感字段，并清理旧配置中的历史字段。
-                    send(c, 200, json(["name": name]), type: "application/json")
+                    let sceneID = atollSceneID(for: name)
+                    scene.set(sceneID)
+                    var response: [String: Any] = ["name": name]
+                    if let sceneID { response["scene_id"] = sceneID }
+                    send(c, 200, json(response), type: "application/json")
                 } catch {
                     send(c, 500, json(["error": "无法保存设置。"]), type: "application/json")
                 }
@@ -122,7 +129,9 @@ final class LocalServer {
                 send(c, 400, json(["error": message]), type: "application/json")
             }
         case ("GET", "/history"):
-            let (_, data) = proxy("/api/history?limit=20", method: "GET", body: nil)
+            // 其他 Loom scene 也会写进同一份 history；多取一点后由页面按 scene
+            // 过滤，才不会因为最近的 Desktop / Workbench 消息把 Atoll 的上下文挤掉。
+            let (_, data) = proxy("/api/history?limit=100", method: "GET", body: nil)
             send(c, 200, data ?? Data("[]".utf8), type: "application/json")
         case ("GET", "/draft"):
             send(c, 200, draftJSON(), type: "application/json")
@@ -147,7 +156,12 @@ final class LocalServer {
             let text = request?["message"] as? String ?? ""
             let sessionID = request?["session_id"] as? String
             guard !text.isEmpty else { return send(c, 400, Data("{}".utf8), type: "application/json") }
-            streamMessage(text, sessionID: sessionID, on: c)
+            // 页面带来的 scene_id 只用于它自己的筛选；上游标签由 daemon 从已验证
+            // 的 Being 名称决定，不能由 WebView 任意指定。
+            guard let sceneID = resolvedSceneID() else {
+                return send(c, 503, json(["error": "暂时无法确认 Being 名称，请稍后重试。"]), type: "application/json")
+            }
+            streamMessage(text, sessionID: sessionID, sceneID: sceneID, on: c)
         default:
             send(c, 404, Data("{}".utf8), type: "application/json")
         }
@@ -181,12 +195,19 @@ final class LocalServer {
     /// 打开一个本地 SSE：上游若立即回流，就原样转给网页；若回 202，则转成一帧
     /// `meta.accepted`，由网页改读 `/active?after=` 的 replay buffer。这个分支就是
     /// BeingAnywhere 的关键处理，不能把 202 误作“没有回复”。
-    private func streamMessage(_ text: String, sessionID: String?, on c: NWConnection) {
-        let payload: [String: Any]
+    private func streamMessage(_ text: String, sessionID: String?, sceneID: String?, on c: NWConnection) {
+        var payload: [String: Any]
         if let sessionID, !sessionID.isEmpty {
             payload = ["message": text, "session_id": String(sessionID.prefix(512))]
         } else {
             payload = ["message": text]
+        }
+        if let sceneID {
+            payload["scene_id"] = sceneID
+            payload["scene_meta"] = [
+                "client": "atoll-being-bridge",
+                "scene_label": "Atoll",
+            ]
         }
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else {
             return send(c, 400, Data("{}".utf8), type: "application/json")
@@ -226,6 +247,39 @@ final class LocalServer {
         return raw
     }
 
+    private func reportedName(fromStatus data: Data?) -> String? {
+        guard let data,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let name = ((object["being_name"] as? String) ?? (object["name"] as? String))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (name?.isEmpty == false) ? name : nil
+    }
+
+    private func knownSceneID() -> String? {
+        if let existing = scene.get() { return existing }
+        if let id = atollSceneID(for: being.state.name) {
+            scene.set(id)
+            return id
+        }
+        return nil
+    }
+
+    /// 正常运行时 poller 已经从 /api/status 拿到名称；刚启动的极短窗口则补一次
+    /// 同一接口，确保第一条消息也不会漏掉 scene 标签。只在发送路径联网，避免
+    /// `/state` 与 `/settings` 因网络暂时不可用拖慢面板的打开。
+    private func resolvedSceneID() -> String? {
+        if let existing = knownSceneID() { return existing }
+        guard let credentials = credentialsProvider() else { return nil }
+        let (code, data) = proxy(credentials, "/api/status", method: "GET", body: nil, timeout: 10)
+        guard code == 200,
+              let name = reportedName(fromStatus: data),
+              let id = atollSceneID(for: name) else { return nil }
+        scene.set(id)
+        return id
+    }
+
     /// 设置页把一条 URL 交给本机 daemon 验证；token 只在这个函数和上游请求里短暂存在，
     /// 不进 Atoll descriptor、日志或设置接口的响应体。
     private func verifyBeingURL(_ raw: String) -> URLVerification {
@@ -237,11 +291,7 @@ final class LocalServer {
         }
         let (code, data) = proxy(credentials, "/api/status", method: "GET", body: nil, timeout: 10)
         guard code == 200,
-              let data,
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let name = ((object["being_name"] as? String) ?? (object["name"] as? String))?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-              !name.isEmpty else {
+              let name = reportedName(fromStatus: data) else {
             return .failure("无法验证这条 URL，请检查地址和 token。")
         }
         return .success(name)
@@ -251,13 +301,14 @@ final class LocalServer {
 
     private func stateJSON() -> Data {
         let b = being.state
-        let o: [String: Any] = [
+        var o: [String: Any] = [
             "name": b.name,
             "status": b.activity.label,
             "dot": b.dotClass,
             "color": b.dotHex,
             "trigger": b.trigger,
         ]
+        if let sceneID = knownSceneID() { o["scene_id"] = sceneID }
         return (try? JSONSerialization.data(withJSONObject: o)) ?? Data("{}".utf8)
     }
 
@@ -265,6 +316,7 @@ final class LocalServer {
         let configured = credentialsProvider() != nil
         var object: [String: Any] = ["configured": configured]
         if configured, being.state.activity != .setup { object["name"] = being.state.name }
+        if let sceneID = knownSceneID() { object["scene_id"] = sceneID }
         return json(object)
     }
 
@@ -322,6 +374,23 @@ private final class DraftBox: @unchecked Sendable {
     }
 
     func get() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}
+
+private final class SceneBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String?
+
+    func set(_ value: String?) {
+        lock.lock()
+        self.value = value
+        lock.unlock()
+    }
+
+    func get() -> String? {
         lock.lock()
         defer { lock.unlock() }
         return value
