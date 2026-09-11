@@ -1,0 +1,31 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: zsh scripts/verify-public.sh
+      - run: zsh scripts/package-release.sh "$GITHUB_REF_NAME"
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release_args=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            release_args+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/atoll-being-bridge-${GITHUB_REF_NAME}-macos-universal.zip#Atoll Being Bridge ${GITHUB_REF_NAME} (macOS universal)" \
+            "dist/atoll-being-bridge-${GITHUB_REF_NAME}-macos-universal.zip.sha256#SHA-256" \
+            --title "Atoll Being Bridge ${GITHUB_REF_NAME}" \
+            --notes-file scripts/release-notes.md \
+            "${release_args[@]}"

@@ -48,6 +48,19 @@ struct ConfigTests {
             try expect(!page.contains("<h1>"),
                        "setup page repeats the native tab title and wastes its small viewport")
 
+            let neutralTab = notchDescriptor(
+                BeingState(name: "Soul", activity: .idle),
+                chatPort: 9021,
+                chatHeight: 278,
+                setupKey: "test-setup-key",
+                id: "test.notch",
+                bundleID: "io.github.beingnotch.test"
+            )
+            let neutralAccent = neutralTab["accentColor"] as? [String: Double]
+            try expect(neutralAccent?["red"] == 1 && neutralAccent?["green"] == 1
+                && neutralAccent?["blue"] == 1,
+                       "notch tab overrides Atoll's neutral selected-icon color")
+
             print("config tests passed")
         } catch {
             fputs("config test failed: \(error)\n", stderr)

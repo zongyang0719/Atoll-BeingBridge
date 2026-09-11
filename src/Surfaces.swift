@@ -7,6 +7,10 @@ import Foundation
 // 而且被拒不写 rateLimit 记录，看起来就像从没发过——老桥卡的就是这一格。
 let tabHeightMin = 160.0
 let tabHeightMax = 420.0
+// Atoll binds a notch experience's accentColor to the selected tab's icon and
+// capsule. Navigation chrome stays neutral; the state color belongs to the
+// live-activity pill and page content instead.
+let neutralTabAccent = RGB(r: 1, g: 1, b: 1)
 
 func fontJSON(_ size: Double, _ weight: String, mono: Bool = false) -> [String: Any] {
     ["design": "default", "size": size, "weight": weight, "isMonospacedDigit": mono]
@@ -60,8 +64,7 @@ func notchDescriptor(_ b: BeingState, chatPort: UInt16?, chatHeight: Double, set
         ]
         return [
             "id": id, "bundleIdentifier": bundleID, "priority": "normal",
-            // 同一状态色用于标签、标题前的状态点，避免泛用的拼图图标和 Lottie 背板。
-            "accentColor": b.dotColor.json, "metadata": [:], "durationHint": 21_600,
+            "accentColor": neutralTabAccent.json, "metadata": [:], "durationHint": 21_600,
             "tab": ["title": b.name,
                     "iconSymbolName": "sparkles",
                     "badgeIcon": dotIcon(12),
@@ -92,7 +95,7 @@ func notchDescriptor(_ b: BeingState, chatPort: UInt16?, chatHeight: Double, set
         "id": id,
         "bundleIdentifier": bundleID,
         "priority": "normal",
-        "accentColor": b.dotColor.json,
+        "accentColor": neutralTabAccent.json,
         "metadata": [:],
         "durationHint": 21_600,
         "tab": tab,
